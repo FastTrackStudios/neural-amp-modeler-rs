@@ -1,0 +1,39 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+warning: neural-amp-modeler@0.1.0: In file included from shim/../NeuralAmpModelerCore/NAM/dsp.h:12,
+warning: neural-amp-modeler@0.1.0:                  from shim/../NeuralAmpModelerCore/NAM/dsp.cpp:11,
+warning: neural-amp-modeler@0.1.0:                  from shim/nam_all.cpp:6:
+warning: neural-amp-modeler@0.1.0: shim/../NeuralAmpModelerCore/NAM/activations.h: In member function 'virtual void nam::activations::ActivationIdentity::apply(float*, long int)':
+warning: neural-amp-modeler@0.1.0: shim/../NeuralAmpModelerCore/NAM/activations.h:179:29: warning: unused parameter 'data' [-Wunused-parameter]
+warning: neural-amp-modeler@0.1.0:   179 |   virtual void apply(float* data, long size) override {};
+warning: neural-amp-modeler@0.1.0:       |                      ~~~~~~~^~~~
+warning: neural-amp-modeler@0.1.0: shim/../NeuralAmpModelerCore/NAM/activations.h:179:40: warning: unused parameter 'size' [-Wunused-parameter]
+warning: neural-amp-modeler@0.1.0:   179 |   virtual void apply(float* data, long size) override {};
+warning: neural-amp-modeler@0.1.0:       |                                   ~~~~~^~~~
+warning: neural-amp-modeler@0.1.0: In file included from shim/nam_all.cpp:15:
+warning: neural-amp-modeler@0.1.0: shim/../NeuralAmpModelerCore/NAM/convnet.cpp: In member function 'void nam::convnet::ConvNet::_verify_weights(int, const std::vector<int>&, bool, size_t)':
+warning: neural-amp-modeler@0.1.0: shim/../NeuralAmpModelerCore/NAM/convnet.cpp:280:55: warning: unused parameter 'channels' [-Wunused-parameter]
+warning: neural-amp-modeler@0.1.0:   280 | void nam::convnet::ConvNet::_verify_weights(const int channels, const std::vector<int>& dilations, const bool batchnorm,
+warning: neural-amp-modeler@0.1.0:       |                                             ~~~~~~~~~~^~~~~~~~
+warning: neural-amp-modeler@0.1.0: shim/../NeuralAmpModelerCore/NAM/convnet.cpp:280:89: warning: unused parameter 'dilations' [-Wunused-parameter]
+warning: neural-amp-modeler@0.1.0:   280 | void nam::convnet::ConvNet::_verify_weights(const int channels, const std::vector<int>& dilations, const bool batchnorm,
+warning: neural-amp-modeler@0.1.0:       |                                                                 ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~
+warning: neural-amp-modeler@0.1.0: shim/../NeuralAmpModelerCore/NAM/convnet.cpp:280:111: warning: unused parameter 'batchnorm' [-Wunused-parameter]
+warning: neural-amp-modeler@0.1.0:   280 | void nam::convnet::ConvNet::_verify_weights(const int channels, const std::vector<int>& dilations, const bool batchnorm,
+warning: neural-amp-modeler@0.1.0:       |                                                                                                    ~~~~~~~~~~~^~~~~~~~~
+warning: neural-amp-modeler@0.1.0: shim/../NeuralAmpModelerCore/NAM/convnet.cpp:281:58: warning: unused parameter 'actual_weights' [-Wunused-parameter]
+warning: neural-amp-modeler@0.1.0:   281 |                                             const size_t actual_weights)
+warning: neural-amp-modeler@0.1.0:       |                                             ~~~~~~~~~~~~~^~~~~~~~~~~~~~
+warning: neural-amp-modeler@0.1.0: In file included from shim/../NeuralAmpModelerCore/NAM/dsp.h:12,
+warning: neural-amp-modeler@0.1.0:                  from shim/../NeuralAmpModelerCore/NAM/get_dsp.h:5,
+warning: neural-amp-modeler@0.1.0:                  from shim/nam_shim.cpp:4:
+warning: neural-amp-modeler@0.1.0: shim/../NeuralAmpModelerCore/NAM/activations.h: In member function 'virtual void nam::activations::ActivationIdentity::apply(float*, long int)':
+warning: neural-amp-modeler@0.1.0: shim/../NeuralAmpModelerCore/NAM/activations.h:179:29: warning: unused parameter 'data' [-Wunused-parameter]
+warning: neural-amp-modeler@0.1.0:   179 |   virtual void apply(float* data, long size) override {};
+warning: neural-amp-modeler@0.1.0:       |                      ~~~~~~~^~~~
+warning: neural-amp-modeler@0.1.0: shim/../NeuralAmpModelerCore/NAM/activations.h:179:40: warning: unused parameter 'size' [-Wunused-parameter]
+warning: neural-amp-modeler@0.1.0:   179 |   virtual void apply(float* data, long size) override {};
+warning: neural-amp-modeler@0.1.0:       |                                   ~~~~~^~~~
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.86s
