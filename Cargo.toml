@@ -1,0 +1,25 @@
+[package]
+name = "neural-amp-modeler"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Safe Rust bindings to NeuralAmpModelerCore — neural network guitar amp/pedal modeling"
+repository = "https://github.com/FastTrackStudios/neural-amp-modeler-rs"
+keywords = ["audio", "dsp", "guitar", "amp-modeling", "neural-network"]
+categories = ["multimedia::audio", "external-ffi-bindings"]
+
+[dependencies]
+serde_json = "1.0"
+
+[build-dependencies]
+cc = "1"
+
+# The realtime path must not xrun in a dev build: NAM runs inside the audio
+# callback, and at opt-level 0 the WaveNet inference does not finish in a
+# buffer period. The FastTrackStudio workspace pins this crate to 3 in its
+# dev profile for the same reason.
+[profile.dev]
+opt-level = 3
+
+[profile.dev.build-override]
+opt-level = 0
