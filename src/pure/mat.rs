@@ -52,6 +52,25 @@ impl Mat {
         &mut self.data[c * rows..(c + 1) * rows]
     }
 
+    /// Move columns `by..by + keep` to `0..keep` — one memmove, no
+    /// allocation (the columns are contiguous in column-major order).
+    #[inline]
+    pub fn shift_cols_left(&mut self, by: usize, keep: usize) {
+        let rows = self.rows;
+        self.data.copy_within(by * rows..(by + keep) * rows, 0);
+    }
+
+    /// The whole column-major buffer.
+    #[inline]
+    pub fn data(&self) -> &[f32] {
+        &self.data
+    }
+
+    #[inline]
+    pub fn data_mut(&mut self) -> &mut [f32] {
+        &mut self.data
+    }
+
     /// Contiguous view of the first `n` columns (all rows), like Eigen `leftCols(n)`.
     #[inline]
     pub fn left_cols_mut(&mut self, n: usize) -> &mut [f32] {
