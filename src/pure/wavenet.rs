@@ -209,8 +209,16 @@ impl Layer {
             film.process_in_place(&mut self.input_mixin.out, condition, num_frames);
         }
 
-        // z = conv out + input mixin out
+        // z = conv out + input mixin out — one flat pass when all three have
+        // the same rows (columns then run contiguously).
         let z_rows = self.z.rows();
+        if self.conv.out.rows() == z_rows && self.input_mixin.out.rows() == z_rows {
+            let n = z_rows * num_frames;
+            let (a, b) = (&self.conv.out.data()[..n], &self.input_mixin.out.data()[..n]);
+            for ((z, a), b) in self.z.data_mut()[..n].iter_mut().zip(a).zip(b) {
+                *z = a + b;
+            }
+        } else {
         for f in 0..num_frames {
             let a = self.conv.out.col(f);
             let b = self.input_mixin.out.col(f);
@@ -218,6 +226,7 @@ impl Layer {
             for r in 0..z_rows {
                 z[r] = a[r] + b[r];
             }
+        }
         }
 
         if let Some(film) = &mut self.activation_pre_film {
@@ -317,7 +326,21 @@ impl Layer {
             }
         }
 
-        // Residual: out_next = input + layer1x1(z), or input if inactive.
+        // Residual: out_next = input + layer1x1(z), or input if inactive —
+        // flat when the shapes line up.
+        let ch = self.channels;
+        let flat = self
+            .layer1x1
+            .as_ref()
+            .filter(|l| input.rows() == ch && l.out.rows() == ch && self.out_next.rows() == ch);
+        if let Some(l) = flat {
+            let n = ch * num_frames;
+            let (x, y) = (&input.data()[..n], &l.out.data()[..n]);
+            for ((o, x), y) in self.out_next.data_mut()[..n].iter_mut().zip(x).zip(y) {
+                *o = x + y;
+            }
+            return;
+        }
         for f in 0..num_frames {
             let in_col = &input.col(f)[..self.channels];
             let out_col = self.out_next.col_mut(f);
@@ -403,6 +426,14 @@ impl LayerArray {
                 Some(h) => &h.out,
                 None => &layer.z,
             };
+            let hs = self.head_output_size;
+            if src.rows() == hs && self.head_inputs.rows() == hs {
+                let n = hs * num_frames;
+                for (d, s) in self.head_inputs.data_mut()[..n].iter_mut().zip(&src.data()[..n]) {
+                    *d += s;
+                }
+                continue;
+            }
             for f in 0..num_frames {
                 let s = &src.col(f)[..self.head_output_size];
                 let d = self.head_inputs.col_mut(f);

@@ -92,8 +92,35 @@ impl Activation {
 
     /// In-place apply over a flat (column-major-contiguous) buffer.
     pub fn apply(&self, data: &mut [f32]) {
-        for (pos, v) in data.iter_mut().enumerate() {
-            *v = self.scalar(*v, pos);
+        // The common activations get a loop of their own: matched once, the
+        // body is a select the compiler vectorizes. Same values as `scalar`.
+        match self {
+            Activation::LeakyReLU(slope) => {
+                let slope = *slope;
+                for v in data.iter_mut() {
+                    *v = if *v > 0.0 { *v } else { slope * *v };
+                }
+            }
+            Activation::ReLU => {
+                for v in data.iter_mut() {
+                    *v = if *v > 0.0 { *v } else { 0.0 };
+                }
+            }
+            Activation::Hardtanh => {
+                for v in data.iter_mut() {
+                    *v = v.clamp(-1.0, 1.0);
+                }
+            }
+            Activation::Fasttanh => {
+                for v in data.iter_mut() {
+                    *v = fast_tanh(*v);
+                }
+            }
+            _ => {
+                for (pos, v) in data.iter_mut().enumerate() {
+                    *v = self.scalar(*v, pos);
+                }
+            }
         }
     }
 
