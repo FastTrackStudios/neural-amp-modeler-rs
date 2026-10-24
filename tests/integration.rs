@@ -2,6 +2,11 @@
 //!
 //! Includes bit-exact comparison tests against the C++ NeuralAmpModelerCore
 //! reference renderer to verify our Rust bindings produce identical output.
+//!
+//! The renderer is host-only: build.rs builds it (and emits
+//! `NAM_REFERENCE_RENDER`) on neither wasm32 nor iOS, so neither does this.
+
+#![cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 
 use neural_amp_modeler::NamModel;
 use std::f64::consts::PI;

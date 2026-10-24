@@ -8,8 +8,22 @@ repository = "https://github.com/FastTrackStudios/neural-amp-modeler-rs"
 keywords = ["audio", "dsp", "guitar", "amp-modeling", "neural-network"]
 categories = ["multimedia::audio", "external-ffi-bindings"]
 
+[features]
+# The vendored C++ core (NeuralAmpModelerCore over FFI) as `NamModel`'s
+# engine on native targets, instead of the Rust engines. Off by default: it
+# costs a C++20 compile of the core with Eigen in build.rs, and valverig's
+# engine is faster. The parity tests need it: the C++ core is their oracle.
+cpp = []
+# The standalone C++ reference renderer tests/integration.rs compares
+# against: a second full compile of the core, which nothing else needs.
+reference-render = ["cpp"]
+
 [dependencies]
 serde_json = "1.0"
+# The default engine (MIT, github.com/ValveRig/valverig-nam). Pinned exactly:
+# it is young (0.0.x), and a release must pass tests/parity.rs before it
+# moves.
+valverig-nam = "=0.0.1"
 
 [build-dependencies]
 cc = "1"
@@ -23,3 +37,11 @@ opt-level = 3
 
 [profile.dev.build-override]
 opt-level = 0
+
+[[test]]
+name = "parity"
+required-features = ["cpp"]
+
+[[test]]
+name = "integration"
+required-features = ["reference-render"]
