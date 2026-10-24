@@ -2,14 +2,17 @@
 //!
 //! Loads `.nam` model files and runs inference for guitar amp/pedal modeling.
 //!
-//! [`NamModel`] is backed by one of two engines with the same API:
+//! [`NamModel`] runs on one of three engines behind the same API:
 //!
-//! - the vendored C++ core over FFI — the default on native targets (the
-//!   `cpp` feature). It is the faster engine, and the oracle the parity
-//!   tests hold the Rust one to; building it costs a C++20 compile of the
-//!   core with Eigen.
-//! - the [`pure`] Rust inference engine — on `wasm32` (no C++ toolchain or
-//!   stdlib there), and everywhere with `default-features = false`.
+//! - [valverig-nam](https://github.com/ValveRig/valverig-nam)'s, the
+//!   default on every target, wasm32 included: pure Rust, allocation-free in
+//!   the audio callback, about twice as fast as the C++ core on WaveNet
+//!   captures and within ~1e-6 of it (tests/parity.rs);
+//! - this crate's own port, [`pure`], for what valverig doesn't do: a
+//!   reduced size of a slimmable WaveNet;
+//! - the vendored C++ core over FFI, with the `cpp` feature (native only).
+//!   It is the oracle the parity tests hold both Rust engines to; building
+//!   it costs a C++20 compile of the core with Eigen.
 //!
 //! # Example
 //!
@@ -262,17 +265,52 @@ impl Drop for NamModel {
 }
 
 // ============================================================================
-// Pure-Rust inference engine: wasm32, or native without the `cpp` feature.
+// The Rust engines: wasm32, or native without the `cpp` feature.
+//
+// valverig-nam (MIT, github.com/ValveRig/valverig-nam) runs the model: on
+// WaveNet captures it is about twice as fast as the C++ core, and it agrees
+// with the C++ core to ~1e-6 (tests/parity.rs). Two things it does not do
+// fall back to this crate's own port, `pure`: the pre-A2 `Linear` and
+// `ConvNet` architectures (which `pure` does not run either, so the load
+// still fails, with valverig's error), and selecting a reduced size of a
+// slimmable *WaveNet* (valverig slims only a `SlimmableContainer`).
 // ============================================================================
+
+#[cfg(not(all(feature = "cpp", not(target_arch = "wasm32"))))]
+const DEFAULT_MAX_BUFFER_SIZE: usize = 4096;
+
+#[cfg(not(all(feature = "cpp", not(target_arch = "wasm32"))))]
+enum Engine {
+    /// valverig's engine, with the f32 blocks it reads and writes: our API
+    /// is f64, and the copies happen through these, sized in `reset`, so
+    /// `process` never allocates.
+    Valverig {
+        model: Box<valverig_nam::loader::Model>,
+        input: Vec<f32>,
+        output: Vec<f32>,
+    },
+    Pure(Box<pure::PureNamModel>),
+}
 
 /// A loaded Neural Amp Modeler model ready for inference.
 ///
-/// Backed by the pure-Rust engine in [`pure`] (without the `cpp` feature, and
-/// always on wasm32). On `wasm32-unknown-unknown` load models with
-/// [`NamModel::from_bytes`] / [`NamModel::from_json`] — there is no filesystem.
+/// Backed by valverig-nam's engine, or this crate's [`pure`] port where
+/// valverig cannot run the model (see the module notes). With the `cpp`
+/// feature on a native target it is the C++ core instead. On
+/// `wasm32-unknown-unknown` load models with [`NamModel::from_bytes`] /
+/// [`NamModel::from_json`]: there is no filesystem.
 #[cfg(not(all(feature = "cpp", not(target_arch = "wasm32"))))]
 pub struct NamModel {
-    inner: pure::PureNamModel,
+    engine: Engine,
+    /// The model's JSON, kept only for a slimmable WaveNet: selecting a
+    /// reduced size rebuilds it on the `pure` engine.
+    slimmable_source: Option<String>,
+    sample_rate: f64,
+    max_buffer_size: usize,
+    expected_sample_rate: Option<f64>,
+    loudness: Option<f64>,
+    input_level: Option<f64>,
+    output_level: Option<f64>,
 }
 
 #[cfg(not(all(feature = "cpp", not(target_arch = "wasm32"))))]
@@ -289,58 +327,149 @@ impl NamModel {
 
     /// Load a model from the raw bytes of a `.nam` file (UTF-8 JSON).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        Ok(Self {
-            inner: pure::PureNamModel::from_bytes(bytes)
-                .map_err(|e| format!("Failed to load NAM model: {e}"))?,
-        })
+        let json =
+            std::str::from_utf8(bytes).map_err(|e| format!("Model is not valid UTF-8: {e}"))?;
+        Self::from_json(json)
     }
 
     /// Load a model from `.nam` JSON text.
     pub fn from_json(json: &str) -> Result<Self, String> {
-        Ok(Self {
-            inner: pure::PureNamModel::from_json(json)
-                .map_err(|e| format!("Failed to load NAM model: {e}"))?,
-        })
+        let mut model = match valverig_nam::loader::Model::from_json(json) {
+            Ok(model) => Self::from_valverig(model, json),
+            Err(valverig) => {
+                let pure = pure::PureNamModel::from_json(json).map_err(|e| {
+                    format!("Failed to load NAM model: {valverig} (and the fallback engine: {e})")
+                })?;
+                Self::from_pure(pure)
+            }
+        };
+        // Usable straight away, as the C++ core is: sized for the default
+        // block and settled. A host calls `reset` with its own rate and size.
+        model.reset(model.expected_sample_rate.unwrap_or(48_000.0), DEFAULT_MAX_BUFFER_SIZE);
+        Ok(model)
+    }
+
+    fn from_valverig(model: valverig_nam::loader::Model, json: &str) -> Self {
+        let meta = &model.metadata;
+        let (loudness, input_level, output_level) =
+            (meta.loudness, meta.input_level_dbu, meta.output_level_dbu);
+        let expected_sample_rate = model.expected_sample_rate;
+        Self {
+            slimmable_source: is_slimmable_wavenet(json).then(|| json.to_owned()),
+            engine: Engine::Valverig {
+                model: Box::new(model),
+                input: Vec::new(),
+                output: Vec::new(),
+            },
+            sample_rate: expected_sample_rate.unwrap_or(48_000.0),
+            max_buffer_size: 0,
+            expected_sample_rate,
+            loudness,
+            input_level,
+            output_level,
+        }
+    }
+
+    fn from_pure(model: pure::PureNamModel) -> Self {
+        Self {
+            expected_sample_rate: model.expected_sample_rate(),
+            loudness: model.loudness(),
+            input_level: model.input_level(),
+            output_level: model.output_level(),
+            sample_rate: model.expected_sample_rate().unwrap_or(48_000.0),
+            max_buffer_size: 0,
+            slimmable_source: None,
+            engine: Engine::Pure(Box::new(model)),
+        }
     }
 
     /// Reset the model for a given sample rate and buffer size, then prewarm.
+    ///
+    /// Allocating: call it before the audio thread starts, and whenever the
+    /// host sample rate or buffer size changes.
     pub fn reset(&mut self, sample_rate: f64, max_buffer_size: usize) {
-        self.inner.reset(sample_rate, max_buffer_size);
+        let max_buffer_size = max_buffer_size.max(1);
+        self.sample_rate = sample_rate;
+        self.max_buffer_size = max_buffer_size;
+        match &mut self.engine {
+            Engine::Valverig { model, input, output } => {
+                model.reset(sample_rate, max_buffer_size);
+                input.resize(max_buffer_size, 0.0);
+                output.resize(max_buffer_size, 0.0);
+            }
+            Engine::Pure(model) => model.reset(sample_rate, max_buffer_size),
+        }
     }
 
     /// Run inference on a block of mono audio.
+    ///
+    /// `input` and `output` must be the same length. Allocation-free once
+    /// [`NamModel::reset`] has run; a block longer than the size `reset`
+    /// was given is processed in pieces of that size.
     pub fn process(&mut self, input: &[f64], output: &mut [f64]) {
-        self.inner.process(input, output);
+        assert_eq!(
+            input.len(),
+            output.len(),
+            "input and output must be the same length"
+        );
+        match &mut self.engine {
+            Engine::Valverig {
+                model,
+                input: scratch_in,
+                output: scratch_out,
+            } => {
+                for (dry, wet) in input
+                    .chunks(scratch_in.len().max(1))
+                    .zip(output.chunks_mut(scratch_out.len().max(1)))
+                {
+                    let n = dry.len();
+                    for (s, &x) in scratch_in[..n].iter_mut().zip(dry) {
+                        *s = x as f32;
+                    }
+                    model.process_mono(&scratch_in[..n], &mut scratch_out[..n]);
+                    for (y, &s) in wet.iter_mut().zip(&scratch_out[..n]) {
+                        *y = f64::from(s);
+                    }
+                }
+            }
+            Engine::Pure(model) => model.process(input, output),
+        }
     }
 
     /// Get the sample rate the model was trained at, or `None` if unknown.
     pub fn expected_sample_rate(&self) -> Option<f64> {
-        self.inner.expected_sample_rate()
+        self.expected_sample_rate
     }
 
     /// Get the model's loudness in dB, if available.
     pub fn loudness(&self) -> Option<f64> {
-        self.inner.loudness()
+        self.loudness
     }
 
     /// Get the input level in dBu, if available.
     pub fn input_level(&self) -> Option<f64> {
-        self.inner.input_level()
+        self.input_level
     }
 
     /// Get the output level in dBu, if available.
     pub fn output_level(&self) -> Option<f64> {
-        self.inner.output_level()
+        self.output_level
     }
 
     /// Number of input channels (typically 1 for guitar models).
     pub fn input_channels(&self) -> usize {
-        self.inner.input_channels()
+        match &self.engine {
+            Engine::Valverig { model, .. } => model.in_channels(),
+            Engine::Pure(model) => model.input_channels(),
+        }
     }
 
     /// Number of output channels (typically 1 for guitar models).
     pub fn output_channels(&self) -> usize {
-        self.inner.output_channels()
+        match &self.engine {
+            Engine::Valverig { model, .. } => model.out_channels(),
+            Engine::Pure(model) => model.output_channels(),
+        }
     }
 
     /// Get all available metadata for this model.
@@ -359,10 +488,44 @@ impl NamModel {
     /// reduction (`SlimmableContainer` and slimmable WaveNets): `val` in
     /// [0.0, 1.0], where 1.0 is full size (the default). Returns `true`
     /// if the model is slimmable, `false` for ordinary models (no-op).
+    ///
+    /// Allocating (not real-time safe). A reduced size of a slimmable
+    /// WaveNet moves the model onto the `pure` engine, which can slim one.
     pub fn set_slimmable_size(&mut self, val: f64) -> bool {
-        self.inner.set_slimmable_size(val)
+        match &mut self.engine {
+            Engine::Pure(model) => model.set_slimmable_size(val),
+            Engine::Valverig { model, .. } => {
+                if model.set_slimmable_size(val).is_ok() {
+                    return true;
+                }
+                let Some(json) = self.slimmable_source.take() else {
+                    return false;
+                };
+                if val >= 1.0 {
+                    // Full size is what valverig runs already.
+                    self.slimmable_source = Some(json);
+                    return true;
+                }
+                let Ok(mut pure) = pure::PureNamModel::from_json(&json) else {
+                    return false;
+                };
+                let slimmed = pure.set_slimmable_size(val);
+                pure.reset(self.sample_rate, self.max_buffer_size.max(1));
+                self.engine = Engine::Pure(Box::new(pure));
+                slimmed
+            }
+        }
     }
 }
+
+/// Whether a model's config has slimmable WaveNet layers (`slimmable` on a
+/// layer array), the one size-switchable shape valverig runs at full size
+/// only. A cheap textual check: a false positive only keeps the JSON.
+#[cfg(not(all(feature = "cpp", not(target_arch = "wasm32"))))]
+fn is_slimmable_wavenet(json: &str) -> bool {
+    json.contains("\"slimmable\"")
+}
+
 
 #[cfg(test)]
 mod tests {

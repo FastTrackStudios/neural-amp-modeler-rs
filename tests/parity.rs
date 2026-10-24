@@ -1,5 +1,6 @@
 //! Parity tests: run the same .nam model + input through the C++ core (via
-//! the FFI `NamModel`) and the pure-Rust engine (`pure::PureNamModel`), and
+//! the FFI `NamModel`, the `cpp` feature) and both Rust engines — valverig's
+//! (`NamModel`'s default) and this crate's port (`pure::PureNamModel`) — and
 //! require the outputs to agree within a small tolerance.
 //!
 //! Both engines compute in f32 but with different accumulation orders
@@ -54,6 +55,33 @@ fn process_pure(path: &PathBuf, input: &[f64]) -> Vec<f64> {
     out
 }
 
+fn process_valverig(path: &PathBuf, input: &[f64]) -> Vec<f64> {
+    let mut m = valverig_nam::loader::Model::from_file(path)
+        .unwrap_or_else(|e| panic!("valverig load {path:?}: {e}"));
+    m.reset(SAMPLE_RATE, BUFFER_SIZE);
+    let mut out = vec![0.0f64; input.len()];
+    let mut dry = vec![0.0f32; BUFFER_SIZE];
+    let mut wet = vec![0.0f32; BUFFER_SIZE];
+    for (ic, oc) in input.chunks(BUFFER_SIZE).zip(out.chunks_mut(BUFFER_SIZE)) {
+        let n = ic.len();
+        for (d, &x) in dry.iter_mut().zip(ic) {
+            *d = x as f32;
+        }
+        m.process_mono(&dry[..n], &mut wet[..n]);
+        for (o, &y) in oc.iter_mut().zip(&wet[..n]) {
+            *o = f64::from(y);
+        }
+    }
+    out
+}
+
+/// Models where our vendored C++ core is wrong and valverig is right: the
+/// core predates upstream's "Fix layer1x1 post FiLM for non-blended gating"
+/// (NeuralAmpModelerCore #322, 69d437e, 2026-08-22), and `pure` copied the
+/// old behaviour. valverig implements the fix, so it differs from this
+/// oracle on these models until the vendored core is bumped.
+const CPP_ORACLE_PREDATES_FIX: &[&str] = &["wavenet_a2_max.nam"];
+
 fn compare(name: &str, a: &[f64], b: &[f64]) {
     let rms = (a.iter().map(|v| v * v).sum::<f64>() / a.len() as f64).sqrt();
     let max_abs = a
@@ -99,7 +127,18 @@ fn parity_for_dir(dir: PathBuf) -> usize {
             }
         };
         let native = process_native(&path, &input);
-        compare(&name, &native, &pure);
+        compare(&format!("{name} (pure)"), &native, &pure);
+        let valverig = process_valverig(&path, &input);
+        if CPP_ORACLE_PREDATES_FIX.contains(&name.as_str()) {
+            let max_abs = native
+                .iter()
+                .zip(&valverig)
+                .map(|(x, y)| (x - y).abs())
+                .fold(0.0f64, f64::max);
+            println!("{name} (valverig): not compared — the vendored C++ predates upstream #322 (max abs diff {max_abs:.3e})");
+        } else {
+            compare(&format!("{name} (valverig)"), &native, &valverig);
+        }
         checked += 1;
     }
     assert!(checked > 0, "no models were parity-checked in {dir:?}");
