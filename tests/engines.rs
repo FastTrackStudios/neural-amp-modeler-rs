@@ -114,10 +114,37 @@ fn a_slimmable_container_slims_on_valverig() {
     }
 }
 
+/// Back at full size, a slimmable WaveNet returns to valverig: the same
+/// output as a model that was never slimmed.
+#[test]
+fn a_slimmable_wavenet_back_at_full_size_is_on_valverig_again() {
+    let input = signal(8192);
+    let mut fresh = NamModel::load(model("slimmable_wavenet.nam")).unwrap();
+    fresh.reset(RATE, 128);
+    let want = run(&mut fresh, &input, 128);
+    let mut m = NamModel::load(model("slimmable_wavenet.nam")).unwrap();
+    assert!(m.set_slimmable_size(0.4));
+    assert!(m.set_slimmable_size(1.0));
+    m.reset(RATE, 128);
+    assert_eq!(run(&mut m, &input, 128), want);
+}
+
 #[test]
 fn an_ordinary_model_is_not_slimmable() {
     let mut m = NamModel::load(model("wavenet.nam")).unwrap();
     assert!(!m.set_slimmable_size(0.5));
+    assert!(!m.set_slimmable_size(1.0));
+}
+
+/// The word in a model's metadata doesn't make it slimmable.
+#[test]
+fn slimmable_in_the_metadata_is_not_a_slimmable_model() {
+    let text = std::fs::read_to_string(model("wavenet.nam")).unwrap();
+    let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    v["metadata"]["slimmable"] = serde_json::json!("not a config");
+    let mut m = NamModel::from_json(&v.to_string()).unwrap();
+    assert!(!m.set_slimmable_size(0.5));
+    assert!(!m.set_slimmable_size(1.0));
 }
 
 #[test]

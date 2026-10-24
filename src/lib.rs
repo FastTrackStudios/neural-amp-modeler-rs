@@ -492,38 +492,63 @@ impl NamModel {
     /// Allocating (not real-time safe). A reduced size of a slimmable
     /// WaveNet moves the model onto the `pure` engine, which can slim one.
     pub fn set_slimmable_size(&mut self, val: f64) -> bool {
-        match &mut self.engine {
-            Engine::Pure(model) => model.set_slimmable_size(val),
-            Engine::Valverig { model, .. } => {
-                if model.set_slimmable_size(val).is_ok() {
-                    return true;
-                }
-                let Some(json) = self.slimmable_source.take() else {
-                    return false;
-                };
-                if val >= 1.0 {
-                    // Full size is what valverig runs already.
-                    self.slimmable_source = Some(json);
-                    return true;
-                }
-                let Ok(mut pure) = pure::PureNamModel::from_json(&json) else {
-                    return false;
-                };
-                let slimmed = pure.set_slimmable_size(val);
-                pure.reset(self.sample_rate, self.max_buffer_size.max(1));
-                self.engine = Engine::Pure(Box::new(pure));
-                slimmed
+        // A SlimmableContainer slims on valverig; an ordinary model on
+        // valverig is not slimmable.
+        if let Engine::Valverig { model, .. } = &mut self.engine {
+            if model.set_slimmable_size(val).is_ok() {
+                return true;
+            }
+            if self.slimmable_source.is_none() {
+                return false;
             }
         }
+        // A slimmable WaveNet: valverig runs it at full size, the port at
+        // any size. Swap engines only once the new one has taken the size.
+        let Some(json) = self.slimmable_source.as_deref() else {
+            // On the port without a source: a model valverig never loaded.
+            return match &mut self.engine {
+                Engine::Pure(model) => model.set_slimmable_size(val),
+                Engine::Valverig { .. } => false,
+            };
+        };
+        if val >= 1.0 {
+            if matches!(self.engine, Engine::Pure(_)) {
+                let Ok(model) = valverig_nam::loader::Model::from_json(json) else {
+                    return false;
+                };
+                self.engine = Engine::Valverig {
+                    model: Box::new(model),
+                    input: Vec::new(),
+                    output: Vec::new(),
+                };
+                self.reset(self.sample_rate, self.max_buffer_size);
+            }
+            return true;
+        }
+        let Ok(mut pure) = pure::PureNamModel::from_json(json) else {
+            return false;
+        };
+        if !pure.set_slimmable_size(val) {
+            return false;
+        }
+        pure.reset(self.sample_rate, self.max_buffer_size.max(1));
+        self.engine = Engine::Pure(Box::new(pure));
+        true
     }
 }
 
-/// Whether a model's config has slimmable WaveNet layers (`slimmable` on a
-/// layer array), the one size-switchable shape valverig runs at full size
-/// only. A cheap textual check: a false positive only keeps the JSON.
+/// Whether a model is a WaveNet with slimmable layers (`slimmable` on a
+/// layer array of its config): the size-switchable shape valverig runs at
+/// full size only.
 #[cfg(not(all(feature = "cpp", not(target_arch = "wasm32"))))]
 fn is_slimmable_wavenet(json: &str) -> bool {
-    json.contains("\"slimmable\"")
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
+        return false;
+    };
+    v.get("architecture").and_then(|a| a.as_str()) == Some("WaveNet")
+        && v.pointer("/config/layers")
+            .and_then(|l| l.as_array())
+            .is_some_and(|layers| layers.iter().any(|l| l.get("slimmable").is_some()))
 }
 
 
