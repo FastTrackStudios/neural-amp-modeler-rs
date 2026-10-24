@@ -2,10 +2,14 @@
 //!
 //! Loads `.nam` model files and runs inference for guitar amp/pedal modeling.
 //!
-//! On native targets, [`NamModel`] wraps the vendored C++ core (compiled by
-//! `build.rs`). On `wasm32` targets — where no C++ toolchain/stdlib is
-//! available — the same API is backed by the [`pure`] Rust inference engine,
-//! which is validated against the C++ core by this crate's parity tests.
+//! [`NamModel`] is backed by one of two engines with the same API:
+//!
+//! - the vendored C++ core over FFI — the default on native targets (the
+//!   `cpp` feature). It is the faster engine, and the oracle the parity
+//!   tests hold the Rust one to; building it costs a C++20 compile of the
+//!   core with Eigen.
+//! - the [`pure`] Rust inference engine — on `wasm32` (no C++ toolchain or
+//!   stdlib there), and everywhere with `default-features = false`.
 //!
 //! # Example
 //!
@@ -45,7 +49,7 @@ pub struct ModelMetadata {
 // Native implementation: FFI over the vendored C++ NeuralAmpModelerCore.
 // ============================================================================
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "cpp", not(target_arch = "wasm32")))]
 mod ffi {
     use std::os::raw::{c_char, c_double, c_int};
 
@@ -90,17 +94,17 @@ mod ffi {
 /// Thread safety: `NamModel` is `Send` but not `Sync`. You can move it
 /// between threads, but must not share it across threads without external
 /// synchronisation (the underlying DSP object is not thread-safe).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "cpp", not(target_arch = "wasm32")))]
 pub struct NamModel {
     ptr: *mut ffi::NamModel,
 }
 
 // NAM models can be moved between threads safely.
 // The underlying C++ DSP object is single-threaded but not tied to a thread.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "cpp", not(target_arch = "wasm32")))]
 unsafe impl Send for NamModel {}
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "cpp", not(target_arch = "wasm32")))]
 impl NamModel {
     fn from_load_result(result: ffi::NamLoadResult) -> Result<Self, String> {
         if !result.error.is_null() {
@@ -248,7 +252,7 @@ impl NamModel {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "cpp", not(target_arch = "wasm32")))]
 impl Drop for NamModel {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
@@ -258,25 +262,25 @@ impl Drop for NamModel {
 }
 
 // ============================================================================
-// wasm32 implementation: pure-Rust inference engine.
+// Pure-Rust inference engine: wasm32, or native without the `cpp` feature.
 // ============================================================================
 
 /// A loaded Neural Amp Modeler model ready for inference.
 ///
-/// On wasm32 this is backed by the pure-Rust engine in [`pure`]; load models
-/// with [`NamModel::from_bytes`] / [`NamModel::from_json`] (there is no
-/// filesystem on `wasm32-unknown-unknown`).
-#[cfg(target_arch = "wasm32")]
+/// Backed by the pure-Rust engine in [`pure`] (without the `cpp` feature, and
+/// always on wasm32). On `wasm32-unknown-unknown` load models with
+/// [`NamModel::from_bytes`] / [`NamModel::from_json`] — there is no filesystem.
+#[cfg(not(all(feature = "cpp", not(target_arch = "wasm32"))))]
 pub struct NamModel {
     inner: pure::PureNamModel,
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(not(all(feature = "cpp", not(target_arch = "wasm32"))))]
 impl NamModel {
     /// Load a `.nam` model file from disk.
     ///
-    /// Compiles on wasm for API parity but fails at runtime on
-    /// `wasm32-unknown-unknown` (no filesystem); use [`NamModel::from_bytes`].
+    /// Fails at runtime on `wasm32-unknown-unknown` (no filesystem); use
+    /// [`NamModel::from_bytes`] there.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         let bytes = std::fs::read(path.as_ref())
             .map_err(|e| format!("Failed to read model file: {e}"))?;

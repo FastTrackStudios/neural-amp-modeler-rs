@@ -8,6 +8,19 @@ repository = "https://github.com/FastTrackStudios/neural-amp-modeler-rs"
 keywords = ["audio", "dsp", "guitar", "amp-modeling", "neural-network"]
 categories = ["multimedia::audio", "external-ffi-bindings"]
 
+[features]
+default = ["cpp"]
+# The vendored C++ core (NeuralAmpModelerCore over FFI) as `NamModel`'s
+# engine on native targets. On by default: it is 1.5-3.8x faster than the
+# pure-Rust engine on WaveNet models (examples/bench.rs, 128-sample blocks),
+# and NAM runs in the audio callback. Without it (`default-features = false`)
+# `NamModel` is the pure-Rust engine everywhere and build.rs compiles no C++.
+# The parity tests need it: it is their oracle.
+cpp = []
+# The standalone C++ reference renderer tests/integration.rs compares
+# against: a second full compile of the core, which nothing else needs.
+reference-render = ["cpp"]
+
 [dependencies]
 serde_json = "1.0"
 
@@ -23,3 +36,11 @@ opt-level = 3
 
 [profile.dev.build-override]
 opt-level = 0
+
+[[test]]
+name = "parity"
+required-features = ["cpp"]
+
+[[test]]
+name = "integration"
+required-features = ["reference-render"]

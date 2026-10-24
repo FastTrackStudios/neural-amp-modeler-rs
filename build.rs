@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
 fn main() {
-    // On wasm32 there is no C++ toolchain/stdlib; the crate uses the pure-Rust
-    // inference engine (src/pure) instead of the vendored C++ core.
+    // The C++ core is opt-in (the `cpp` feature): without it — and always on
+    // wasm32, which has no C++ toolchain/stdlib — `NamModel` is the pure-Rust
+    // engine (src/pure) and there is nothing to build.
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-    if target_arch == "wasm32" {
+    if target_arch == "wasm32" || std::env::var_os("CARGO_FEATURE_CPP").is_none() {
         return;
     }
 
@@ -56,9 +57,11 @@ fn main() {
     // Build the reference renderer tool for integration tests.
     // This is a standalone C++ executable that processes audio through NAM
     // directly, so we can compare its output against our Rust bindings.
+    // Only with the `reference-render` feature (tests/integration.rs): it is
+    // a second full C++ compile of the core, which nothing else needs.
     // Host-only: it shells out to the host g++, meaningless when
     // cross-compiling (iOS).
-    if target_os == "ios" {
+    if target_os == "ios" || std::env::var_os("CARGO_FEATURE_REFERENCE_RENDER").is_none() {
         return;
     }
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
