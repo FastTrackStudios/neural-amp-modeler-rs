@@ -145,9 +145,9 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "valverig-nam"
-version = "0.0.1"
+version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59d1fc2bc218caad2b4dc86aa60a8ad1b7f9db86e4bf5f65d89ecbc7ff32a803"
+checksum = "2b433eda144bd0e4e4c8acb001fb66d31148c4152c988c26f5cb2f3961462651"
 dependencies = [
  "serde",
  "serde_json",

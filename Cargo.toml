@@ -23,7 +23,7 @@ serde_json = "1.0"
 # The default engine (MIT, github.com/ValveRig/valverig-nam). Pinned exactly:
 # it is young (0.0.x), and a release must pass tests/parity.rs before it
 # moves.
-valverig-nam = "=0.0.1"
+valverig-nam = "=0.0.2"
 
 [build-dependencies]
 cc = "1"
